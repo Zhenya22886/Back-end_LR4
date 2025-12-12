@@ -2,11 +2,17 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from flask import jsonify, request
+from passlib.hash import pbkdf2_sha256
+from flask_jwt_extended import (
+    create_access_token,
+    jwt_required,
+    get_jwt_identity,
+)
 
 from app import app, db
 from app.models import User, Category, Record, Account
 
-# Healthcheck
+# Healthcheck 
 
 @app.get("/healthcheck")
 def healthcheck():
@@ -24,6 +30,7 @@ def error_response(message: str, status_code: int = 400):
 def user_to_dict(user: User) -> dict:
     return {
         "id": user.id,
+        "username": user.username,
         "name": user.name,
     }
 
@@ -52,10 +59,62 @@ def account_to_dict(account: Account) -> dict:
         "balance": float(account.balance) if account.balance is not None else 0.0,
     }
 
+
+# Authentication
+
+@app.post("/user")
+def register_user():
+    data = request.get_json(silent=True) or {}
+
+    username = data.get("username")
+    password = data.get("password")
+    name = data.get("name")
+
+    if not username or not password or not name:
+        return error_response(
+            "Fields 'username', 'password' and 'name' are required"
+        )
+
+    if User.query.filter_by(username=username).first() is not None:
+        return error_response("User with this username already exists", 400)
+
+    user = User(
+        username=username,
+        password=pbkdf2_sha256.hash(password),
+        name=name,
+    )
+
+    db.session.add(user)
+    db.session.commit()
+
+    return jsonify(user_to_dict(user)), 201
+
+
+@app.post("/login")
+def login():
+    data = request.get_json(silent=True) or {}
+
+    username = data.get("username")
+    password = data.get("password")
+
+    if not username or not password:
+        return error_response("Fields 'username' and 'password' are required")
+
+    user = User.query.filter_by(username=username).first()
+
+    if user and pbkdf2_sha256.verify(password, user.password):
+        access_token = create_access_token(identity=user.id)
+        return jsonify({"access_token": access_token}), 200
+
+    return error_response("Invalid username or password", 401)
+
 # USERS 
 
 @app.get("/user/<int:user_id>")
+@jwt_required()
 def get_user(user_id: int):
+    _current_user_id = get_jwt_identity()  
+
     user = User.query.get(user_id)
     if user is None:
         return error_response("User not found", 404)
@@ -63,7 +122,10 @@ def get_user(user_id: int):
 
 
 @app.delete("/user/<int:user_id>")
+@jwt_required()
 def delete_user(user_id: int):
+    _current_user_id = get_jwt_identity()
+
     user = User.query.get(user_id)
     if user is None:
         return error_response("User not found", 404)
@@ -74,23 +136,11 @@ def delete_user(user_id: int):
     return jsonify({"status": "deleted"}), 200
 
 
-@app.post("/user")
-def create_user():
-    data = request.get_json(silent=True) or {}
-
-    name = data.get("name")
-    if not name:
-        return error_response("Field 'name' is required")
-
-    user = User(name=name)
-    db.session.add(user)
-    db.session.commit()
-
-    return jsonify(user_to_dict(user)), 201
-
-
 @app.get("/users")
+@jwt_required()
 def list_users():
+    _current_user_id = get_jwt_identity()
+
     all_users = User.query.order_by(User.id.asc()).all()
     return jsonify([user_to_dict(u) for u in all_users]), 200
 
@@ -98,7 +148,10 @@ def list_users():
 # ACCOUNTS 
 
 @app.get("/user/<int:user_id>/account")
+@jwt_required()
 def get_account(user_id: int):
+    _current_user_id = get_jwt_identity()
+
     user = User.query.get(user_id)
     if user is None:
         return error_response("User not found", 404)
@@ -113,7 +166,10 @@ def get_account(user_id: int):
 
 
 @app.post("/user/<int:user_id>/account/deposit")
+@jwt_required()
 def deposit_to_account(user_id: int):
+    _current_user_id = get_jwt_identity()
+
     user = User.query.get(user_id)
     if user is None:
         return error_response("User not found", 404)
@@ -146,13 +202,19 @@ def deposit_to_account(user_id: int):
 # CATEGORIES 
 
 @app.get("/category")
+@jwt_required()
 def list_categories():
+    _current_user_id = get_jwt_identity()
+
     categories = Category.query.order_by(Category.id.asc()).all()
     return jsonify([category_to_dict(c) for c in categories]), 200
 
 
 @app.post("/category")
+@jwt_required()
 def create_category():
+    _current_user_id = get_jwt_identity()
+
     data = request.get_json(silent=True) or {}
 
     name = data.get("name")
@@ -171,7 +233,10 @@ def create_category():
 
 
 @app.delete("/category")
+@jwt_required()
 def delete_category():
+    _current_user_id = get_jwt_identity()
+
     category_id = request.args.get("id", type=int)
     if category_id is None:
         return error_response("Query parameter 'id' is required")
@@ -188,7 +253,10 @@ def delete_category():
 # RECORDS 
 
 @app.get("/record/<int:record_id>")
+@jwt_required()
 def get_record(record_id: int):
+    _current_user_id = get_jwt_identity()
+
     record = Record.query.get(record_id)
     if record is None:
         return error_response("Record not found", 404)
@@ -196,7 +264,10 @@ def get_record(record_id: int):
 
 
 @app.delete("/record/<int:record_id>")
+@jwt_required()
 def delete_record(record_id: int):
+    _current_user_id = get_jwt_identity()
+
     record = Record.query.get(record_id)
     if record is None:
         return error_response("Record not found", 404)
@@ -208,7 +279,10 @@ def delete_record(record_id: int):
 
 
 @app.post("/record")
+@jwt_required()
 def create_record():
+    _current_user_id = get_jwt_identity()
+
     data = request.get_json(silent=True) or {}
 
     required_fields = ["user_id", "category_id", "amount"]
@@ -252,7 +326,7 @@ def create_record():
     if account is None:
         account = Account(user_id=user.id, balance=Decimal("0"))
         db.session.add(account)
-        db.session.flush()  
+        db.session.flush()
 
     current_balance = account.balance or Decimal("0")
 
@@ -275,7 +349,10 @@ def create_record():
 
 
 @app.get("/record")
+@jwt_required()
 def list_records():
+    _current_user_id = get_jwt_identity()
+
     user_id = request.args.get("user_id", type=int)
     category_id = request.args.get("category_id", type=int)
 

@@ -7,6 +7,11 @@ class User(db.Model):
     __tablename__ = "users"
 
     id = db.Column(db.Integer, primary_key=True)
+
+    username = db.Column(db.String(128), nullable=False, unique=True)
+
+    password = db.Column(db.String(256), nullable=False)
+
     name = db.Column(db.String(128), nullable=False)
 
     records = db.relationship(
@@ -23,7 +28,7 @@ class User(db.Model):
     )
 
     def __repr__(self) -> str:
-        return f"<User {self.id} {self.name!r}>"
+        return f"<User {self.id} {self.username!r}>"
 
 
 class Category(db.Model):
